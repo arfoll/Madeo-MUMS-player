@@ -66,9 +66,6 @@ class GstPlayer:
         bus.connect('message::async-done', self.on_message_async_done)
         bus.add_signal_watch()
 
-#        bus.connect('message::buffering', self.on_message_buffering)
-#        bus.connect('message::clock-lost', self.on_message_clock_lost)
-
     def on_message_async_done(self, bus, message):
         self.n_video = self.player.get_property('n-video')
         self.n_audio = self.player.get_property('n-audio')
@@ -84,27 +81,27 @@ class GstPlayer:
         if sink is not None:
             factory = sink.get_factory()
             if "ismd_vidrend_bin" in factory.get_name():
-                print "SMD video sink %s" % sink
+                logging.debug("using SMD video sink %s" % sink)
                 self._videosink = sink
             elif "autovideosink" in factory.get_name():
-                print "Found Autovideosink"
+                logging.debug("using Autovideosink")
                 for child in sink.sinks():
                     factory = child.get_factory()
                     if "ismd_vidrend_bin" in factory.get_name():
-                        print "SMD video sink %s" % child
+                        logging.debug("SMD video sink %s" % child)
                         self._videosink = child
 
         sink = self.player.get_property('audio-sink')
         if sink is not None:
             factory = sink.get_factory()
             if "ismd_audio_sink" in factory.get_name():
-                print "SMD audio sink %s" % sink
+                logging.debug("Using SMD audio sink %s" % sink)
             elif "autoaudiosink" in factory.get_name():
-                print "Found Autoaudiosink"
+                logging.debug("Using Autoaudiosink")
                 for child in sink.sinks():
                     factory = child.get_factory()
                     if "ismd_audio_sink" in factory.get_name():
-                        print "SMD audio sink %s" % child
+                        logging.debug("SMD audio sink %s" % child)
 
     def cleanup(self):
         current = self.player.get_state(0)[1]
