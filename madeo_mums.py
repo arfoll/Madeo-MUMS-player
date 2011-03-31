@@ -25,23 +25,21 @@ import gst
 import dbus
 import dbus.service
 from dbus.mainloop.glib import DBusGMainLoop
+import logging
 
 UPLAYER_BUS_NAME = 'uk.co.madeo.uplayer'
 UPLAYER_BUS_PATH = '/uk/co/madeo/uplayer'
-
-import logging
 LOG_FILENAME = '/tmp/uplayer.log'
+
 logging.basicConfig(filename=LOG_FILENAME,level=logging.DEBUG)
 
-class GstPlayer:
 
+class GstPlayer:
     STOPPED = 0
     PLAYING = 1
     PAUSED = 2
     BUFFERING = 3
     PREROLLING = 4
-    
-    logging.debug ("Starting uplayer...")
 
     def __init__(self):
         self.status = self.STOPPED
@@ -49,7 +47,7 @@ class GstPlayer:
 
         self._dir = 1
         self._rate = 1.0
-        
+
         self.c_video = 0
         self.c_audio = 0
         self.c_text = 0
@@ -67,7 +65,7 @@ class GstPlayer:
         bus.connect('message::state-changed', self.on_message_state_changed)
         bus.connect('message::async-done', self.on_message_async_done)
         bus.add_signal_watch()
-        
+
 #        bus.connect('message::buffering', self.on_message_buffering)
 #        bus.connect('message::clock-lost', self.on_message_clock_lost)
 
@@ -267,8 +265,11 @@ class GstPlayer:
                 self.player.set_property("current-text", current)
                 self.c_text = current
 
-    def change_plane(self):
-        self._videosink.set_property('gdl-plane', 5)
+    def set_gdl_plane(self, plane):
+        if plane > 0 and plane < 7:
+            self._videosink.set_property('gdl-plane', plane)
+            return True
+        return False
 
     def set_user_agent(self, user_agent):
         source = self.player.get_property('source')
@@ -277,6 +278,14 @@ class GstPlayer:
         except:
             logging.debug ("failed to set user-agent to %s" % user_agent)
             pass
+
+    def set_rectangle_size(self, x, y, w, h):
+        # check we are using ismd sink
+        if self._videosink is not None:
+            logging.debug ("rectangle size changed to %s %d %d %d %d" % (self._videosink, x, y, w, h))
+            self._videosink.set_property ("rectangle", "%d,%d,%d,%d" % (x, y, w, h))
+            return True
+        return False
 
 class uplayerDBUSService(dbus.service.Object):
     def __init__(self):
@@ -312,7 +321,7 @@ class uplayerDBUSService(dbus.service.Object):
         return self.player.get_position()
 
     @dbus.service.method(UPLAYER_BUS_NAME,
-                         in_signature='i', out_signature='')    
+                         in_signature='i', out_signature='')
     def seek(self, position):
         self.player.seek(position)
 
@@ -322,9 +331,19 @@ class uplayerDBUSService(dbus.service.Object):
         self.player.set_rate(rate)
 
     @dbus.service.method(UPLAYER_BUS_NAME,
-                         in_signature='s', out_signature='')
+                         in_signature='s', out_signature='b')
     def set_user_agent(self, user_agent):
-        self.player.set_user_agent(user_agent)
+        return self.player.set_user_agent(user_agent)
+
+    @dbus.service.method(UPLAYER_BUS_NAME,
+                        in_signature='iiii', out_signature='')
+    def set_rectangle_size(self, x, y, w, h):
+        self.player.set_rectangle_size(x,y,w,h)
+
+    @dbus.service.method(UPLAYER_BUS_NAME,
+                         in_signature='i', out_signature='b')
+    def set_gdl_plane(self, gdl_plane):
+        return self.player.set_gdl_plane (gdl_plane)
 
 DBusGMainLoop(set_as_default=True)
 uplayerService = uplayerDBUSService()
@@ -333,5 +352,6 @@ player = GstPlayer()
 def send_eos ():
     uplayerService.emitEOSSignal()
 
+logging.debug ("Starting uplayer...")
 loop = gobject.MainLoop()
 loop.run()
