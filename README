@@ -1,3 +1,7 @@
+This is a Meego unified multimedia service player. Uplayer. This player is made to work with the Intel CE devices on MeeGo and gst-fluendo-ismd GStreamer plugins. This player however does not require gst-fluendo-ismd and will work with autovideosink and software decoders if these are available.
+
+Note that some API options such as 'set_gdl_plane' will only work if using gst-fluendo-ismd plugins.
+
 API to use this DBUS player - This API is NOT STABLE!
 
 Note by default this is meant to be run as a daemon and will log to /tmp/uplayer by default

@@ -34,7 +34,6 @@ LOG_FILENAME = '/tmp/uplayer.log'
 
 logging.basicConfig(filename=LOG_FILENAME,level=logging.DEBUG)
 
-
 class GstPlayer:
     STOPPED = 0
     PLAYING = 1
@@ -46,7 +45,6 @@ class GstPlayer:
         self.status = self.STOPPED
         self.target_status = self.STOPPED
 
-        self._dir = 1
         self._rate = 1.0
 
         self.c_video = 0
@@ -158,10 +156,6 @@ class GstPlayer:
                 del self._videosink
                 self._videosink = None
 
-    def toggle_direction(self):
-        self._dir = -self._dir
-        self.set_rate (abs(self._rate))
-
     def pause(self):
         self.target_status = self.PAUSED
         self.player.set_state(gst.STATE_PAUSED)
@@ -219,7 +213,7 @@ class GstPlayer:
     def set_rate(self, rate):
         self.pause()
 
-        self._rate = self._dir * rate
+        self._rate = rate
         try:
             position, format = self.player.query_position(gst.FORMAT_TIME)
         except:
