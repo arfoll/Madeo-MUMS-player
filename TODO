@@ -2,5 +2,4 @@ Currently Missing :
 
 - signal on stop
 - abstraction of FFW/RW with a 'jump'
-- implement reverse playback? 
 - set & retrieve video/audio streams
