@@ -3,3 +3,4 @@ Currently Missing :
 - signal on stop
 - abstraction of FFW/RW with a 'jump'
 - set & retrieve video/audio streams
+- make jump/seek work on seconds and not on GST_POSITIONS

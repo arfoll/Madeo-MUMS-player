@@ -1,55 +1,12 @@
-This is a Meego unified multimedia service player. Uplayer. This player is made to work with the Intel CE devices on MeeGo and gst-fluendo-ismd GStreamer plugins. This player however does not require gst-fluendo-ismd and will work with autovideosink and software decoders if these are available.
+This is a Meego unified multimedia service player. Uplayer. This player
+is made to work with the Intel CE devices on MeeGo and gst-fluendo-ismd
+GStreamer plugins. This player however does not require gst-fluendo-ismd
+and will work with autovideosink and software decoders if these are
+available.
 
-Note that some API options such as 'set_gdl_plane' will only work if using gst-fluendo-ismd plugins.
+Note that some API options such as 'set_gdl_plane' will only work if
+using gst-fluendo-ismd plugins.
 
-API to use this DBUS player - This API is NOT STABLE!
-
-Note by default this is meant to be run as a daemon and will log to /tmp/uplayer by default
-
-<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
-"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
-<node name="/uk/co/madeo/uplayer">
-  <interface name="org.freedesktop.DBus.Introspectable">
-    <method name="Introspect">
-      <arg direction="out" type="s" />
-    </method>
-  </interface>
-  <interface name="uk.co.madeo.uplayer">
-    <method name="play">
-    </method>
-    <method name="pause">
-    </method>
-    <method name="get_position">
-      <arg direction="out" type="t" />
-    </method>
-    <method name="set_gdl_plane">
-      <arg direction="in"  type="i" name="gdl_plane" />
-      <arg direction="out" type="b" />
-    </method>
-    <method name="seek">
-      <arg direction="in"  type="i" name="position" />
-    </method>
-    <method name="stop">
-    </method>
-    <method name="set_user_agent">
-      <arg direction="in"  type="s" name="user_agent" />
-      <arg direction="out" type="b" />
-    </method>
-    <signal name="emitEOSSignal">
-    </signal>
-    <method name="set_uri">
-      <arg direction="in"  type="s" name="uri" />
-      <arg direction="out" type="b" />
-    </method>
-    <method name="set_rectangle_size">
-      <arg direction="in"  type="i" name="x" />
-      <arg direction="in"  type="i" name="y" />
-      <arg direction="in"  type="i" name="w" />
-      <arg direction="in"  type="i" name="h" />
-    </method>
-    <method name="set_rate">
-      <arg direction="in"  type="i" name="rate" />
-    </method>
-  </interface>
-</node>
+Note by default this is meant to be run as a daemon and will log to
+/tmp/uplayer by default
 
