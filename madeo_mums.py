@@ -258,7 +258,7 @@ class GstPlayer:
                 self.c_text = current
 
     def set_gdl_plane(self, plane):
-        if plane > 0 and plane < 7:
+        if plane > 3 and plane < 8:
             self._videosink.set_property('gdl-plane', plane)
             return True
         return False
@@ -333,7 +333,7 @@ class uplayerDBUSService(dbus.service.Object):
         self.player.set_rectangle_size(x,y,w,h)
 
     @dbus.service.method(UPLAYER_BUS_NAME,
-                         in_signature='s', out_signature='b')
+                         in_signature='i', out_signature='b')
     def set_gdl_plane(self, gdl_plane):
         return self.player.set_gdl_plane (gdl_plane)
 
