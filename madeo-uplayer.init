@@ -30,17 +30,20 @@ case "$1" in
   stop)
     echo -n $"Stopping madeo-uplayer: "
     killproc $prog
-        sleep 1
+      sleep 1
     echo
     rm -f $lockfile
     ;;
-  restart)
+  restart|reload)
     $0 stop
-        sleep 1
+      sleep 1
     $0 start
     ;;
+  status)
+    [ -f $lockfile ] || return 3
+    ;;
   *)
-    echo "Usage: $0 {start|stop|restart}"
+    echo "Usage: $0 {start|stop|status|restart}"
     exit 2
 esac
 
