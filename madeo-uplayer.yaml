@@ -1,0 +1,14 @@
+Name: madeo-uplayer
+Summary: Madeo MUMS uplayer
+Version: 0.1.1
+Release: 1
+Group: System/X11
+License: LGPLv2
+URL: https://github.com/arfoll/Madeo-MUMS-player
+Sources:
+    - https://github.com/arfoll/Madeo-MUMS-player/zipball/v%{version}
+Description: |
+    Uplayer is the Madeo implementation for a MUMS player in MeeGo
+Files:
+    - "%doc README TODO"
+    - "%{_bindir}/madeo-uplayer"
