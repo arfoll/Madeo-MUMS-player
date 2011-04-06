@@ -11,9 +11,14 @@ Version:    0.1.1
 Release:    1
 Group:      System/X11
 License:    LGPLv2
+BuildArch:  noarch
 URL:        https://github.com/arfoll/Madeo-MUMS-player
 Source0:    madeo-uplayer-%{version}.tar.bz2
 Source100:  madeo-uplayer.yaml
+Requires(post): /sbin/service
+Requires(post): /sbin/chkconfig
+Requires(postun): /sbin/service
+Requires(postun): /sbin/chkconfig
 
 
 %description
@@ -39,12 +44,24 @@ Uplayer is the Madeo implementation for a MUMS player in MeeGo
 %install
 rm -rf %{buildroot}
 # >> install pre
-mkdir -p %{buildroot}%{_bindir}/ .%{_initrddir}
+mkdir -p %{buildroot}%{_bindir}/ %{buildroot}%{_initrddir}/
 install -m 755 madeo-uplayer %{buildroot}%{_bindir}/madeo-uplayer
-install -p -m755 madeo-uplayer.init .%{_initrddir}/madeo-uplayer
+install -p -m 755 madeo-uplayer.init %{buildroot}%{_initrddir}/madeo-uplayer
 # << install pre
 
 # >> install post
+%preun
+if [ "$1" -eq 0 ]; then
+/sbin/service madeo-uplayer stop &> /dev/null
+/sbin/chkconfig --del madeo-uplayer
+fi
+:
+
+%postun
+if [ "$1" -ge 1 ]; then
+/sbin/service madeo-uplayer condrestart &> /dev/null
+fi
+:
 # << install post
 
 
@@ -56,6 +73,7 @@ install -p -m755 madeo-uplayer.init .%{_initrddir}/madeo-uplayer
 %defattr(-,root,root,-)
 %doc README TODO LICENSE
 %{_bindir}/madeo-uplayer
+%{_initrddir}/madeo-uplayer
 # >> files
 # << files
 
