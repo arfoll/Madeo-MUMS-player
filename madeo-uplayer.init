@@ -29,7 +29,7 @@ case "$1" in
     ;;
   stop)
     echo -n $"Stopping madeo-uplayer: "
-    killproc $prog
+    killproc python $prog
       sleep 1
     echo
     rm -f $lockfile
