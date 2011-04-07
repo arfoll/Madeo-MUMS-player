@@ -47,6 +47,7 @@ rm -rf %{buildroot}
 mkdir -p %{buildroot}%{_bindir}/ %{buildroot}%{_initrddir}/
 install -m 755 madeo-uplayer %{buildroot}%{_bindir}/madeo-uplayer
 install -p -m 755 madeo-uplayer.init %{buildroot}%{_initrddir}/madeo-uplayer
+install -p  uk.co.madeo.uplayer.conf %{buildroot}/etc/dbus-1/system.d/uk.co.madeo.uplayer.conf
 # << install pre
 
 # >> install post
@@ -74,6 +75,7 @@ fi
 %doc README TODO LICENSE
 %{_bindir}/madeo-uplayer
 %{_initrddir}/madeo-uplayer
+/etc/dbus-1/system.d/uk.co.madeo.uplayer.conf
 # >> files
 # << files
 
