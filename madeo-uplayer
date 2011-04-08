@@ -15,7 +15,7 @@
 #
 # You should have received a copy of the GNU Lesser General Public
 # License along with madeo-uplayer; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 # 02110-1301  USA
 
 import sys, os
@@ -119,11 +119,12 @@ class GstPlayer:
         self.playing = False
         self.stop()
 
-    def set_location(self, location):
-        if not gst.uri_is_valid(location):
-            logging.debug ("Error: Invalid URI: %s\n" % location)
+    def set_uri(self, uri):
+        if not gst.uri_is_valid(uri):
+            logging.debug ("Error: Invalid URI: %s\n" % uri)
             return False
-        self.player.set_property('uri', location)
+        self.player.set_property('uri', uri)
+        send_new_uri(uri)
         return True
 
     def on_message_error(self, bus, message):
@@ -291,10 +292,15 @@ class uplayerDBUSService(dbus.service.Object):
         logging.debug ("EOS signal sent")
         return
 
+    @dbus.service.signal(UPLAYER_BUS_NAME, signature='s')
+    def emitNewURI(self, uri):
+        logging.debug ("New URI signal sent")
+        return
+
     @dbus.service.method(UPLAYER_BUS_NAME,
                          in_signature='s', out_signature='b')
     def set_uri(self, uri):
-        return self.player.set_location(uri);
+        return self.player.set_uri(uri);
 
     @dbus.service.method(UPLAYER_BUS_NAME)
     def play(self):
@@ -344,6 +350,9 @@ player = GstPlayer()
 
 def send_eos ():
     uplayerService.emitEOSSignal()
+
+def send_new_uri (uri):
+    uplayerService.emitNewURI(uri)
 
 logging.debug ("Starting uplayer...")
 loop = gobject.MainLoop()
