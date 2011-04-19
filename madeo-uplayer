@@ -222,6 +222,7 @@ class GstPlayer:
     def set_rate(self, rate):
         self.pause()
 
+        logging.debug ("rate set to %s" % rate);
         self._rate = rate
         try:
             position, format = self.player.query_position(gst.FORMAT_TIME)
@@ -238,11 +239,6 @@ class GstPlayer:
                 gst.SEEK_FLAG_FLUSH,
                 gst.SEEK_TYPE_SET, position,
                 gst.SEEK_TYPE_SET, -1)
-
-        if res:
-            gst.info("rate set to %s" % rate)
-        else:
-            logging.debug ("failed to change video rate");
         self.play()
 
     def next_video_stream(self):
