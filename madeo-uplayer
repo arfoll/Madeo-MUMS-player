@@ -126,7 +126,7 @@ class GstPlayer:
         # At every set_uri we reset playbin2
         self.cleanup()
         self.reset_player()
-        
+
         if not gst.uri_is_valid(uri):
             logging.debug ("Error: Invalid URI: %s\n" % uri)
             return False
@@ -199,6 +199,7 @@ class GstPlayer:
         except:
             position = gst.CLOCK_TIME_NONE
 
+        position = position * (1e-09)
         return position
 
     def seek(self, location):
@@ -284,6 +285,16 @@ class GstPlayer:
             return True
         return False
 
+    def get_duration(self):
+        try:
+            duration, format = self.player.query_duration(gst.FORMAT_TIME)
+            duration = duration * (1e-09)
+        except:
+            duration = 10000
+
+        logging.debug ("gave duration : %d" % duration)
+        return duration
+
 class uplayerDBUSService(dbus.service.Object):
     def __init__(self):
         bus_name = dbus.service.BusName(UPLAYER_BUS_NAME, bus=dbus.SystemBus())
@@ -318,7 +329,7 @@ class uplayerDBUSService(dbus.service.Object):
         self.player.stop();
 
     @dbus.service.method(UPLAYER_BUS_NAME,
-                         in_signature='', out_signature='t')
+                         in_signature='', out_signature='i')
     def get_position(self):
         return self.player.get_position()
 
@@ -346,6 +357,11 @@ class uplayerDBUSService(dbus.service.Object):
                          in_signature='i', out_signature='b')
     def set_gdl_plane(self, gdl_plane):
         return self.player.set_gdl_plane (gdl_plane)
+
+    @dbus.service.method(UPLAYER_BUS_NAME,
+                         in_signature='', out_signature='i')
+    def get_duration(self):
+        return self.player.get_duration ()
 
 DBusGMainLoop(set_as_default=True)
 uplayerService = uplayerDBUSService()
