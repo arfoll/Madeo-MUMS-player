@@ -58,7 +58,10 @@ class GstPlayer:
         self._videosink = None
 
         self.player = gst.element_factory_make('playbin2', None)
+        self.player.set_state(gst.STATE_NULL)
 
+    def reset_player(self):
+        self.player = gst.element_factory_make('playbin2', None)
         bus = self.player.get_bus()
         bus.connect('message::eos', self.on_message_eos)
         bus.connect('message::error', self.on_message_error)
@@ -120,6 +123,10 @@ class GstPlayer:
         self.stop()
 
     def set_uri(self, uri):
+        # At every set_uri we reset playbin2
+        self.cleanup()
+        self.reset_player()
+        
         if not gst.uri_is_valid(uri):
             logging.debug ("Error: Invalid URI: %s\n" % uri)
             return False
