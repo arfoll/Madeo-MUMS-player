@@ -56,6 +56,7 @@ class GstPlayer:
         self.n_text = 0
 
         self._videosink = None
+        self.uses_ismd = True
 
         self.player = gst.element_factory_make('playbin2', None)
         self.player.set_state(gst.STATE_NULL)
@@ -82,16 +83,21 @@ class GstPlayer:
             self.player.set_property("current-text", self.c_text)
         sink = self.player.get_property('video-sink')
         if sink is not None:
+            self._videosink = sink
             factory = sink.get_factory()
             if "ismd_vidrend_bin" in factory.get_name():
                 logging.debug("using SMD video sink %s" % sink)
-                self._videosink = sink
+                self.uses_ismd = True
             elif "autovideosink" in factory.get_name():
                 logging.debug("using Autovideosink")
+                self._videosink.set_property('message-forward', True)
                 for child in sink.sinks():
                     factory = child.get_factory()
                     if "ismd_vidrend_bin" in factory.get_name():
                         logging.debug("SMD video sink %s" % child)
+                        self._videosink = child
+                    elif "xvimagesink" in factory.get_name():
+                        logging.debug("xvimagesink sink %s" % child)
                         self._videosink = child
 
         sink = self.player.get_property('audio-sink')
@@ -161,7 +167,7 @@ class GstPlayer:
                 else:
                     self.status = self.PAUSED
         elif new_state == gst.STATE_READY:
-            if self._videosink is not None:
+            if self.uses_ismd:
                 del self._videosink
                 self._videosink = None
 
@@ -264,10 +270,21 @@ class GstPlayer:
                 self.c_text = current
 
     def set_gdl_plane(self, plane):
-        if plane > 3 and plane < 8:
+        if plane > 3 and plane < 8 and self.uses_ismd:
             self._videosink.set_property('gdl-plane', plane)
             return True
         return False
+
+    def set_window_id(self, window_id):
+        #check we are using xvimagesink?
+        try:
+            logging.debug ("_videosink is %s" % self._videosink)
+            self._videosink.set_xwindow_id(window_id)
+            logging.debug ("setting xwindowid to %s succeeded" % window_id)
+            return True
+        except:
+            logging.debug ("setting xwindowid to %s failed" % window_id)
+            return False
 
     def set_user_agent(self, user_agent):
         source = self.player.get_property('source')
@@ -279,7 +296,7 @@ class GstPlayer:
 
     def set_rectangle_size(self, x, y, w, h):
         # check we are using ismd sink
-        if self._videosink is not None:
+        if self.uses_ismd:
             logging.debug ("rectangle size changed to %s %d %d %d %d" % (self._videosink, x, y, w, h))
             self._videosink.set_property ("rectangle", "%d,%d,%d,%d" % (x, y, w, h))
             return True
@@ -362,6 +379,11 @@ class uplayerDBUSService(dbus.service.Object):
                          in_signature='', out_signature='i')
     def get_duration(self):
         return self.player.get_duration ()
+
+    @dbus.service.method(UPLAYER_BUS_NAME,
+                         in_signature='i', out_signature='b')
+    def set_xwindow_id(self, window_id):
+        return self.player.set_window_id (window_id)
 
 DBusGMainLoop(set_as_default=True)
 uplayerService = uplayerDBUSService()
