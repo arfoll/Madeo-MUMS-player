@@ -286,6 +286,13 @@ class GstPlayer:
             logging.debug ("setting xwindowid to %s failed" % window_id)
             return False
 
+    def set_volume(self, volume):
+        try:
+            self.player.set_property("volume", volume)
+        except:
+            logging.debug ("setting volume to %s failed" % volume)
+            return False
+
     def set_user_agent(self, user_agent):
         source = self.player.get_property('source')
         try:
@@ -384,6 +391,11 @@ class uplayerDBUSService(dbus.service.Object):
                          in_signature='i', out_signature='b')
     def set_xwindow_id(self, window_id):
         return self.player.set_window_id (window_id)
+
+    @dbus.service.method(UPLAYER_BUS_NAME,
+                         in_signature='d', out_signature='b')
+    def set_volume(self, volume):
+        return self.player.set_volume(volume)
 
 DBusGMainLoop(set_as_default=True)
 uplayerService = uplayerDBUSService()
