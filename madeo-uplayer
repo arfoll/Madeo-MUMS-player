@@ -47,6 +47,7 @@ class GstPlayer:
         self.target_status = self.STOPPED
 
         self._rate = 1.0
+        self._volume = 1.0
 
         self.c_video = 0
         self.c_audio = 0
@@ -185,6 +186,7 @@ class GstPlayer:
         elif current != gst.STATE_PLAYING :
             self.player.set_state(gst.STATE_PAUSED)
             self.status = self.PREROLLING
+        self.set_volume (self._volume)
 
     def stop(self):
         self.player.set_state(gst.STATE_READY)
@@ -288,7 +290,10 @@ class GstPlayer:
 
     def set_volume(self, volume):
         try:
+            self._volume = volume
             self.player.set_property("volume", volume)
+            logging.debug("volume set to %f" % self._volume)
+            return True
         except:
             logging.debug ("setting volume to %s failed" % volume)
             return False
