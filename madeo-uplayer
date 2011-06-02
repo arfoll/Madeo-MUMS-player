@@ -112,6 +112,8 @@ class GstPlayer:
                     factory = child.get_factory()
                     if "ismd_audio_sink" in factory.get_name():
                         logging.debug("SMD audio sink %s" % child)
+        send_playing ()
+        send_duration (self.get_duration())
 
     def cleanup(self):
         current = self.player.get_state(0)[1]
@@ -316,10 +318,10 @@ class GstPlayer:
 
     def get_duration(self):
         try:
-            duration, format = self.player.query_duration(gst.FORMAT_TIME)
+            duration = self.player.query_duration(gst.FORMAT_TIME, None)[0]
             duration = duration * (1e-09)
         except:
-            duration = 10000
+            duration = -1
 
         logging.debug ("gave duration : %d" % duration)
         return duration
@@ -338,6 +340,16 @@ class uplayerDBUSService(dbus.service.Object):
     @dbus.service.signal(UPLAYER_BUS_NAME, signature='s')
     def emitNewURI(self, uri):
         logging.debug ("New URI signal sent")
+        return
+
+    @dbus.service.signal(UPLAYER_BUS_NAME, signature='i')
+    def emitDuration(self, duration):
+        logging.debug ("Duration signal sent")
+        return
+
+    @dbus.service.signal(UPLAYER_BUS_NAME)
+    def emitPlaying(self):
+        logging.debug ("Playing signal sent")
         return
 
     @dbus.service.method(UPLAYER_BUS_NAME,
@@ -411,6 +423,12 @@ def send_eos ():
 
 def send_new_uri (uri):
     uplayerService.emitNewURI(uri)
+
+def send_duration (duration):
+    uplayerService.emitDuration(duration)
+
+def send_playing ():
+    uplayerService.emitPlaying()
 
 logging.debug ("Starting uplayer...")
 loop = gobject.MainLoop()
