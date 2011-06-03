@@ -150,6 +150,7 @@ class GstPlayer:
         self.status = self.STOPPED
         self.target_status = self.status
         logging.debug ("Gstreamer %s:%s" % (err, msg))
+        send_error_message (msg)
 
     def on_message_state_changed(self, bus, message):
         if message.src != self.player:
@@ -352,6 +353,11 @@ class uplayerDBUSService(dbus.service.Object):
         logging.debug ("Playing signal sent")
         return
 
+    @dbus.service.signal(UPLAYER_BUS_NAME)
+    def emitError(self, msg):
+        logging.debug ("Error signal sent")
+        return
+
     @dbus.service.method(UPLAYER_BUS_NAME,
                          in_signature='s', out_signature='b')
     def set_uri(self, uri):
@@ -429,6 +435,9 @@ def send_duration (duration):
 
 def send_playing ():
     uplayerService.emitPlaying()
+
+def send_error_message (msg):
+    uplayerService.emitError(msg)
 
 logging.debug ("Starting uplayer...")
 loop = gobject.MainLoop()
