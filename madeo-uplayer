@@ -146,11 +146,12 @@ class GstPlayer:
     def on_message_error(self, bus, message):
         err, msg = message.parse_error()
         code = message.structure['gerror'].code
+        if self.status != self.STOPPED:
+            send_error_message (msg)
         self.stop()
         self.status = self.STOPPED
         self.target_status = self.status
         logging.debug ("Gstreamer %s:%s" % (err, msg))
-        send_error_message (msg)
 
     def on_message_state_changed(self, bus, message):
         if message.src != self.player:
