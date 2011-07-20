@@ -328,6 +328,21 @@ class GstPlayer:
         logging.debug ("gave duration : %d" % duration)
         return duration
 
+    def set_jump(self, length):
+        logging.debug ("jumping length : %d" % length)
+        try:
+            # GStreamer wants nanoseconds
+            length = length * (1e09)
+            logging.debug ("jumping length in nanoseconds : %d" % length)
+            position, format = self.player.query_position(gst.FORMAT_TIME)
+            logging.debug ("position is : %d" % position)
+            jump_position = position + length
+            logging.debug ("jump_position is : %d" % jump_position)
+            res = self.player.seek_simple(gst.FORMAT_TIME, gst.SEEK_FLAG_FLUSH, jump_position)
+            return True
+        except:
+            return False
+
 class uplayerDBUSService(dbus.service.Object):
     def __init__(self):
         bus_name = dbus.service.BusName(UPLAYER_BUS_NAME, bus=dbus.SystemBus())
@@ -420,6 +435,11 @@ class uplayerDBUSService(dbus.service.Object):
                          in_signature='d', out_signature='b')
     def set_volume(self, volume):
         return self.player.set_volume(volume)
+        
+    @dbus.service.method(UPLAYER_BUS_NAME,
+                         in_signature='i', out_signature='b')
+    def set_jump(self, length):
+        return self.player.set_jump(length)
 
 DBusGMainLoop(set_as_default=True)
 uplayerService = uplayerDBUSService()
