@@ -65,6 +65,13 @@ class GstPlayer:
     def reset_player(self):
         self.player = gst.element_factory_make('playbin2', None)
         bus = self.player.get_bus()
+        #ban the mpeg4 ISMD H/W decoder because it decodes divx badly. 
+        #See bug MeeGo #BOO 11189
+        reg = gst.registry_get_default()
+        feature = reg.find_feature ("ismd_mpeg4_viddec", gst.TYPE_ELEMENT_FACTORY)
+        if feature is not None:
+            feature.set_rank (gst.RANK_NONE)
+        #connect stuff to the bus
         bus.connect('message::eos', self.on_message_eos)
         bus.connect('message::error', self.on_message_error)
         bus.connect('message::state-changed', self.on_message_state_changed)
@@ -252,6 +259,7 @@ class GstPlayer:
                 gst.SEEK_FLAG_FLUSH,
                 gst.SEEK_TYPE_SET, position,
                 gst.SEEK_TYPE_SET, -1)
+
         self.play()
 
     def next_video_stream(self):
