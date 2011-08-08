@@ -59,13 +59,12 @@ class GstPlayer:
         self._videosink = None
         self.uses_ismd = True
 
-        self.player = gst.element_factory_make('playbin2', None)
-        self.player.set_state(gst.STATE_NULL)
+        self.player = None
 
     def reset_player(self):
         self.player = gst.element_factory_make('playbin2', None)
         bus = self.player.get_bus()
-        #ban the mpeg4 ISMD H/W decoder because it decodes divx badly. 
+        #ban the mpeg4 ISMD H/W decoder because it usually gives garbage
         #See bug MeeGo #BOO 11189
         reg = gst.registry_get_default()
         feature = reg.find_feature ("ismd_mpeg4_viddec", gst.TYPE_ELEMENT_FACTORY)
@@ -123,15 +122,16 @@ class GstPlayer:
         send_duration (self.get_duration())
 
     def cleanup(self):
-        current = self.player.get_state(0)[1]
-        if current != gst.STATE_NULL:
-            logging.debug ('do_cleanup')
-            self.player.set_state(gst.STATE_READY)
-            current = self.player.get_state(1000000000)[1]
-            logging.debug ('changed state to %s' % current)
-            self.player.set_state(gst.STATE_NULL)
-            current = self.player.get_state(1000000000)[1]
-            logging.debug ('changed state to %s' % current)
+        if self.player is not None:
+            current = self.player.get_state(0)[1]
+            if current != gst.STATE_NULL:
+                logging.debug ('do_cleanup')
+                self.player.set_state(gst.STATE_READY)
+                current = self.player.get_state(1000000000)[1]
+                logging.debug ('changed state to %s' % current)
+                self.player.set_state(gst.STATE_NULL)
+                current = self.player.get_state(1000000000)[1]
+                logging.debug ('changed state to %s' % current)
 
     def on_message_eos(self, bus, message):
         send_eos()
