@@ -59,12 +59,18 @@ class GstPlayer:
         self._videosink = None
         self.uses_ismd = True
 
-        self.player = gst.element_factory_make('playbin2', None)
-        self.player.set_state(gst.STATE_NULL)
+        self.player = None
 
     def reset_player(self):
         self.player = gst.element_factory_make('playbin2', None)
         bus = self.player.get_bus()
+        #ban the mpeg4 ISMD H/W decoder because it usually gives garbage
+        #See bug MeeGo #BOO 11189
+        reg = gst.registry_get_default()
+        feature = reg.find_feature ("ismd_mpeg4_viddec", gst.TYPE_ELEMENT_FACTORY)
+        if feature is not None:
+            feature.set_rank (gst.RANK_NONE)
+        #connect stuff to the bus
         bus.connect('message::eos', self.on_message_eos)
         bus.connect('message::error', self.on_message_error)
         bus.connect('message::state-changed', self.on_message_state_changed)
@@ -116,15 +122,16 @@ class GstPlayer:
         send_duration (self.get_duration())
 
     def cleanup(self):
-        current = self.player.get_state(0)[1]
-        if current != gst.STATE_NULL:
-            logging.debug ('do_cleanup')
-            self.player.set_state(gst.STATE_READY)
-            current = self.player.get_state(1000000000)[1]
-            logging.debug ('changed state to %s' % current)
-            self.player.set_state(gst.STATE_NULL)
-            current = self.player.get_state(1000000000)[1]
-            logging.debug ('changed state to %s' % current)
+        if self.player is not None:
+            current = self.player.get_state(0)[1]
+            if current != gst.STATE_NULL:
+                logging.debug ('do_cleanup')
+                self.player.set_state(gst.STATE_READY)
+                current = self.player.get_state(1000000000)[1]
+                logging.debug ('changed state to %s' % current)
+                self.player.set_state(gst.STATE_NULL)
+                current = self.player.get_state(1000000000)[1]
+                logging.debug ('changed state to %s' % current)
 
     def on_message_eos(self, bus, message):
         send_eos()
@@ -252,6 +259,7 @@ class GstPlayer:
                 gst.SEEK_FLAG_FLUSH,
                 gst.SEEK_TYPE_SET, position,
                 gst.SEEK_TYPE_SET, -1)
+
         self.play()
 
     def next_video_stream(self):
@@ -327,6 +335,21 @@ class GstPlayer:
 
         logging.debug ("gave duration : %d" % duration)
         return duration
+
+    def set_jump(self, length):
+        logging.debug ("jumping length : %d" % length)
+        try:
+            # GStreamer wants nanoseconds
+            length = length * (1e09)
+            logging.debug ("jumping length in nanoseconds : %d" % length)
+            position, format = self.player.query_position(gst.FORMAT_TIME)
+            logging.debug ("position is : %d" % position)
+            jump_position = position + length
+            logging.debug ("jump_position is : %d" % jump_position)
+            res = self.player.seek_simple(gst.FORMAT_TIME, gst.SEEK_FLAG_FLUSH, jump_position)
+            return True
+        except:
+            return False
 
 class uplayerDBUSService(dbus.service.Object):
     def __init__(self):
@@ -420,6 +443,11 @@ class uplayerDBUSService(dbus.service.Object):
                          in_signature='d', out_signature='b')
     def set_volume(self, volume):
         return self.player.set_volume(volume)
+        
+    @dbus.service.method(UPLAYER_BUS_NAME,
+                         in_signature='i', out_signature='b')
+    def set_jump(self, length):
+        return self.player.set_jump(length)
 
 DBusGMainLoop(set_as_default=True)
 uplayerService = uplayerDBUSService()
