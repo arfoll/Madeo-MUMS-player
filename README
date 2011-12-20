@@ -1,12 +1,38 @@
-This is a Meego unified multimedia service player. Uplayer. This player
-is made to work with the Intel CE devices on MeeGo and gst-fluendo-ismd
-GStreamer plugins. This player however does not require gst-fluendo-ismd
-and will work with autovideosink and software decoders if these are
-available.
+-- Read First! --
+This WAS the UMMS present in MeeGo 1.2. The now preferred solution 
+is to use the Intel UMMS : meego.gitorious.org/meego-middleware/umms. The API
+used in this player is not completely dissimilar. The later MeeGo 1.2 TV builds
+still ships this player for backwards compatibility but is not used by the UI.
+The Intel UMMS is written in C/GObject and is much harder to quickly develop and
+extend.
 
-Note that some API options such as 'set_gdl_plane' will only work if
-using gst-fluendo-ismd plugins.
+-- Intro --
+This is a Meego unified multimedia service player. Uplayer. This player is made
+to work with the Intel CE devices on MeeGo and gst-fluendo-ismd GStreamer
+plugins. This player however does not require gst-fluendo-ismd and will work
+with autovideosink and software decoders if these are available.
 
-Note by default this is meant to be run as a daemon and will log to
-/tmp/uplayer by default
+-- GDL/ISMD --
+Note that some API options such as 'set_gdl_plane' will only work if using
+gst-fluendo-ismd plugins on an Intel CE platform. The player has only been tested
+on CE41xx hardware (sodaville).
 
+-- TS mode --
+A new mode is present which can be activated before using set_uri - set_ts_mode.
+This mode will require a few things to be installed on the device, namely
+mpegtsparse from gst-plugins-bad and flutimeshift (There are builds for meego on
+build.meego.com in the home:brendan project). If either elements is missing
+playback will fail in TS mode with little warning.
+
+libgstmpegdemux.so is not shipped in the gst-plugins-bad in meego for some reason
+so I extracted it from the codec pkgs I made for meego. Be warned i have no idea
+why it was removed by Intel but I guess a legal reason. Use at your own risk :
+http://www.madeo.co.uk/files/libgstmpegdemux.so
+
+-- Logging --
+Note by default this is meant to be run as a daemon and will log to /tmp/uplayer
+by default
+
+-- Thanks --
+Fluendo - for the great code examples:
+https://core.fluendo.com/gstreamer/svn/trunk/gst-fluendo-ismd/examples/ismdplay_dvb.py

@@ -35,9 +35,164 @@ import logging
 
 UPLAYER_BUS_NAME = 'uk.co.madeo.uplayer'
 UPLAYER_OBJ_PATH = '/uk/co/madeo/uplayer'
-LOG_FILENAME = '/tmp/uplayer.log'
 
-logging.basicConfig(filename=LOG_FILENAME,level=logging.DEBUG)
+LOG_FILENAME = '/tmp/uplayer.log'
+LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+
+logging.basicConfig(filename=LOG_FILENAME, level=logging.DEBUG, fomat=LOG_FORMAT)
+
+class TSPipeline(gst.Pipeline):
+
+    RECORDING_TEMPLATE = "/tmp/ts.XXXXXX"
+
+    def __init__(self):
+        gst.Pipeline.__init__(self, 'TSPipeline')
+
+        self._src = None
+        self._videobin = None
+        self._audiobin = None
+
+        self._vlinked = False
+        self._alinked = False
+
+        self._enable_buffering = False
+        self._buffering_size = 512 * 1024        
+        self._underrun_signal = None
+        self._running_signal = None
+
+    def link_videopad(self, srcpad):
+        if not self._vlinked:
+            logging.debug('link video pad to %s' % srcpad)
+            sinkpad = self._vdec.get_pad('sink')
+            srcpad.link (sinkpad)
+            self._vlinked = True
+
+    def link_audiopad(self, srcpad):
+        if not self._alinked:
+            logging.debug('link audio pad to %s' % srcpad)
+            sinkpad = self._asink.get_pad('sink')
+            srcpad.link (sinkpad)
+            self._alinked = True
+
+    def on_underrun (self, queue):
+            logging.debug("underrun detected")
+            if self._running_signal is None:
+                self._queue.set_property ("min-threshold-bytes", self._buffering_size)
+                self._running_signal = self._queue.connect('running', self.on_running)
+            self.post_message (gst.message_new_buffering (self, 0))
+
+    def on_running (self, queue):
+            logging.debug("pipeline prerolled")
+            self._queue.set_property ("min-threshold-bytes", 0)
+            self._queue.disconnect (self._running_signal)
+            self._running_signal = None
+            self.post_message (gst.message_new_buffering (self, 100))
+                
+    def build_pipeline (self, stream):
+        if self._src is None:
+            logging.debug('Opening %s' % stream)
+            logging.debug('create src')
+            self._src = gst.parse_launch('filesrc location=%s' % stream)
+            logging.debug('adding src %s to bin' % self._src)
+            self.add(self._src)
+            logging.debug('create queue')
+            self._queue = gst.element_factory_make('queue', 'tsqueue')
+            if self._enable_buffering:
+                self._queue.set_property ("min-threshold-bytes", self._buffering_size)
+                self._queue.set_property ("max-size-buffers", 0)
+                self._underrun_signal = self._queue.connect('underrun', self.on_underrun)
+                self._running_signal = self._queue.connect('running', self.on_running)
+            self.add(self._queue)
+
+            self._shift = gst.element_factory_make('flumpegshifter')
+            self._shift.set_property ("recording-template", self.RECORDING_TEMPLATE)
+            self.add(self._shift)
+            self._demux = gst.element_factory_make('flutsdemux')
+            self.add(self._demux)
+
+            # Connect handler for 'pad-added' signal
+            self._demux.connect('pad-added', self.on_new_decoded_pad)
+
+            gst.element_link_many(self._src, self._queue, self._shift, self._demux)
+
+            self._vdec = gst.element_factory_make('ismd_mpeg2_viddec')
+            #self.v_dec = gst.element_factory_make('decodebin2')
+            #self._vdec.set_property ("use-buffering", False)
+            self.add(self._vdec)
+
+            self._vsink = gst.element_factory_make('ismd_vidrend_bin')
+            self.add(self._vsink)
+
+            gst.element_link_many(self._vdec, self._vsink)
+
+            self._asink = gst.element_factory_make('ismd_audio_sink')
+            self._asink.set_property ("use-buffering", False)
+            self.add(self._asink)
+
+            self._asink.sync_state_with_parent()            
+            self._vsink.sync_state_with_parent()
+            self._vdec.sync_state_with_parent()
+            self._shift.sync_state_with_parent()            
+            self._demux.sync_state_with_parent()
+            self._queue.sync_state_with_parent()
+            self._src.sync_state_with_parent()
+            
+    def destroy_pipeline(self):
+        if self._src is not None:
+            logging.debug("removing src elements")
+            if self._underrun_signal is not None:
+                self._queue.disconnect (self._underrun_signal)
+
+            if self._running_signal is not None:
+                self._queue.disconnect(self._running_signal)
+
+            gst.element_unlink_many(self._src, self._queue, self._demux, self._vdec, self._vsink, self._asink)
+            self._vlinked = False
+            self._alinked = False
+            
+            self.remove (self._src, self._queue, self._demux, self._vdec, self._vsink, self._asink)
+            del self._asink
+            del self._vsink
+            del self._vdec
+            del self._demux
+            del self._queue
+            del self._src
+            self._asink = None
+            self._vsink = None
+            self._vdec = None
+            self._demux = None
+            self._queue = None
+            self._src = None
+
+    def do_cleanup(self):
+        current = self.get_state(0)[1]
+        if current != gst.STATE_NULL:
+            logging.debug('do_cleanup')
+            self.set_state(gst.STATE_READY)
+            current = self.get_state(0)[1]
+            logging.debug('changed state to %s' % current)
+            self.set_state(gst.STATE_NULL)
+            current = self.get_state(0)[1]
+            self.destroy_pipeline()
+            logging.debug('changed state to %s' % current)
+
+    def open_stream(self, stream):
+        current = self.get_state(0)[1]
+        self.do_cleanup()
+        self.build_pipeline (program)
+
+        logging.debug('going to change state to %s' % current)
+        self.set_state(current)
+   
+    def on_new_decoded_pad(self, element, pad):
+        padname = pad.get_name()
+        caps = pad.get_caps()
+        name = caps[0].get_name()
+        logging.debug('padname %s %s' % (padname, caps))
+        if 'video/' in name:
+            self.link_videopad(pad)
+        elif 'audio/' in name:
+            self.link_audiopad(pad)
 
 class GstPlayer:
     STOPPED = 0
@@ -45,18 +200,6 @@ class GstPlayer:
     PAUSED = 2
     BUFFERING = 3
     PREROLLING = 4
-
-    DEMUX_BIN = \
-        'flumpegshifter name=timeshift recording-template=/tmp/ts.XXXXXX ! ' \
-        'flutsdemux name=demux'
-    VIDEO_BIN = 'queue name=vqueue ! decodebin2 ! ' \
-        'queue name=vdq max-size-buffers=3 max-size-time=0 max-size-bytes=0 ! '\
-        'videoscale ! colorspace ! queue name=vcq ! autovideosink name=vsink'
-    VIDEO_BIN_ISMD = 'queue name=vqueue ! decodebin2 ! ' \
-        'queue name=vdq max-size-buffers=3 max-size-time=0 max-size-bytes=0 ! '\
-        'autovideosink name=vsink'
-    AUDIO_BIN = 'queue name=aqueue ! decodebin2 ! queue name=adq ! audioconvert ! ' \
-        'queue name=acq ! autoaudiosink'
 
     def __init__(self):
         self.status = self.STOPPED
@@ -78,21 +221,15 @@ class GstPlayer:
         self.uri = ""
 
         self.player = None
-        self.bin = None
 
         self.has_video = None
         self.has_audio = None
 
     def setup_player(self):
+        logging.debug('starting player setup')
         if self.ts_mode:
-            self.player = gst.Pipeline("player")
-            self.bin = gst.parse_bin_from_description('%s ! mpegtsparse ! %s' % \
-                (self.uri, self.DEMUX_BIN), False)
-            demux = self.bin.get_by_name("demux")
-            demux.connect('pad-added', self.on_new_pad)
-            self.player.add(self.bin)
-            self.bin.sync_state_with_parent()
-
+            self.player = TSPipeline()
+            self.player.build_pipeline(self.uri)
         else:
             self.player = gst.element_factory_make('playbin2', None)
             self.player.set_property('uri', self.uri)
@@ -107,92 +244,61 @@ class GstPlayer:
         #connect stuff to the bus
         bus.connect('message::eos', self.on_message_eos)
         bus.connect('message::error', self.on_message_error)
-        bus.connect('message::state-changed', self.on_message_state_changed)
+        #bus.connect('message::state-changed', self.on_message_state_changed)
         bus.connect('message::async-done', self.on_message_async_done)
         bus.add_signal_watch()
 
-    def on_new_pad(self, element, pad):
-        padname = pad.get_name()
-        caps = pad.get_caps()
-        name = caps[0].get_name()
-        bin = None
-        queue = None
-
-        if 'video' in name and not self.has_video:
-            bin = gst.parse_bin_from_description(self.VIDEO_BIN, False)
-            if bin:
-                queue = bin.get_by_name("vqueue")
-                self.has_video = True
-
-        elif 'audio' in name and not self.has_audio:
-            bin = gst.parse_bin_from_description(self.AUDIO_BIN, False)
-            if bin:
-                queue = bin.get_by_name("aqueue")
-                self.has_audio = True
-
-        if bin and queue:
-            targetpad = queue.get_pad('sink')
-            ghostpad = gst.GhostPad('sink', targetpad)
-            bin.add_pad(ghostpad)
-            self.bin.add(bin)
-            bin.set_state(gst.STATE_READY)
-            pad.link(ghostpad)
-            bin.sync_state_with_parent()
-            # ensure to preroll the sinks
-            self.bin.lost_state_full(True)
-
-        gst.DEBUG_BIN_TO_DOT_FILE (self.player, \
-                    gst.DEBUG_GRAPH_SHOW_ALL, 'uplayer_bin.png')
-
     def on_message_async_done(self, bus, message):
-        self.n_video = self.player.get_property('n-video')
-        self.n_audio = self.player.get_property('n-audio')
-        self.n_text = self.player.get_property('n-text')
-        logging.debug ("%d video %d audio %d text" % (self.n_video, self.n_audio, self.n_text))
-        if self.n_video > 0:
-            self.player.set_property("current-video", self.c_video)
-        if self.n_audio > 0:
-            self.player.set_property("current-audio", self.c_audio)
-        if self.n_text > 0:
-            self.player.set_property("current-text", self.c_text)
-        sink = self.player.get_property('video-sink')
-        if sink is not None:
-            self._videosink = sink
-            factory = sink.get_factory()
-            if "ismd_vidrend_bin" in factory.get_name():
-                logging.debug("using SMD video sink %s" % sink)
-                self.uses_ismd = True
-            elif "autovideosink" in factory.get_name():
-                logging.debug("using Autovideosink")
-                self._videosink.set_property('message-forward', True)
-                for child in sink.sinks():
-                    factory = child.get_factory()
-                    if "ismd_vidrend_bin" in factory.get_name():
-                        logging.debug("SMD video sink %s" % child)
-                        self._videosink = child
-                    elif "xvimagesink" in factory.get_name():
-                        logging.debug("xvimagesink sink %s" % child)
-                        self._videosink = child
+        logging.debug('async done')
+        if not self.ts_mode:
+            self.n_video = self.player.get_property('n-video')
+            self.n_audio = self.player.get_property('n-audio')
+            self.n_text = self.player.get_property('n-text')
+            logging.debug ("%d video %d audio %d text" % (self.n_video, self.n_audio, self.n_text))
+            if self.n_video > 0:
+                self.player.set_property("current-video", self.c_video)
+            if self.n_audio > 0:
+                self.player.set_property("current-audio", self.c_audio)
+            if self.n_text > 0:
+                self.player.set_property("current-text", self.c_text)
+            sink = self.player.get_property('video-sink')
+            if sink is not None:
+                self._videosink = sink
+                factory = sink.get_factory()
+                if "ismd_vidrend_bin" in factory.get_name():
+                    logging.debug("using SMD video sink %s" % sink)
+                    self.uses_ismd = True
+                elif "autovideosink" in factory.get_name():
+                    logging.debug("using Autovideosink")
+                    self._videosink.set_property('message-forward', True)
+                    for child in sink.sinks():
+                        factory = child.get_factory()
+                        if "ismd_vidrend_bin" in factory.get_name():
+                            logging.debug("SMD video sink %s" % child)
+                            self._videosink = child
+                        elif "xvimagesink" in factory.get_name():
+                            logging.debug("xvimagesink sink %s" % child)
+                            self._videosink = child
 
-        sink = self.player.get_property('audio-sink')
-        if sink is not None:
-            factory = sink.get_factory()
-            if "ismd_audio_sink" in factory.get_name():
-                logging.debug("Using SMD audio sink %s" % sink)
-            elif "autoaudiosink" in factory.get_name():
-                logging.debug("Using Autoaudiosink")
-                for child in sink.sinks():
-                    factory = child.get_factory()
-                    if "ismd_audio_sink" in factory.get_name():
-                        logging.debug("SMD audio sink %s" % child)
+            sink = self.player.get_property('audio-sink')
+            if sink is not None:
+                factory = sink.get_factory()
+                if "ismd_audio_sink" in factory.get_name():
+                    logging.debug("Using SMD audio sink %s" % sink)
+                elif "autoaudiosink" in factory.get_name():
+                    logging.debug("Using Autoaudiosink")
+                    for child in sink.sinks():
+                        factory = child.get_factory()
+                        if "ismd_audio_sink" in factory.get_name():
+                            logging.debug("SMD audio sink %s" % child)
         send_playing ()
         send_duration (self.get_duration())
 
     def cleanup(self):
-        if self.bin:
-            self.player.remove(self.bin)
-            self.player.remove(self.bin)
-        if self.player:
+        logging.debug('cleaning up player')
+        if self.player and self.ts_mode:
+            self.player.do_cleanup()
+        elif self.player:
             current = self.player.get_state(0)[1]
             if current != gst.STATE_NULL:
                 logging.debug ('do_cleanup')
@@ -203,7 +309,6 @@ class GstPlayer:
                 current = self.player.get_state(1000000000)[1]
                 logging.debug ('changed state to %s' % current)
         #scrap all elements we may have
-        bin = None
         self.player = None
         #reset vars
         self.has_video = None
@@ -224,15 +329,19 @@ class GstPlayer:
 
     def set_uri(self, uri):
         if not gst.uri_is_valid(uri):
-            logging.debug ("Error: Invalid URI: %s\n" % uri)
+            logging.error ("Invalid URI: %s" % uri)
             return False
 
         # if valid we set the new uri which is set in setup
-        self.uri = uri
+        if self.ts_mode:
+          self.uri = uri.replace('file://', '')
+        else:
+          self.uri = uri
         # At every set_uri we clean the pipeline
         self.cleanup()
         self.setup_player()
         # signal that we have a new uri
+        logging.debug ("New URI: %s" % uri)
         send_new_uri(uri)
         return True
 
@@ -247,6 +356,7 @@ class GstPlayer:
         logging.debug ("Gstreamer %s:%s" % (err, msg))
 
     def on_message_state_changed(self, bus, message):
+        logging.debug('pipe state changing %s', message)
         if message.src != self.player:
             return
 
@@ -257,20 +367,20 @@ class GstPlayer:
             if self.status != self.PLAYING:
                 self.status = self.PLAYING
                 self.playing = True
-                gst.DEBUG_BIN_TO_DOT_FILE (self.player, \
-                    gst.DEBUG_GRAPH_SHOW_ALL, 'uplayer_pipe.png')
-
-
+            gst.DEBUG_BIN_TO_DOT_FILE (self.player, \
+                gst.DEBUG_GRAPH_SHOW_ALL, 'uplayer_pipe.png')
+                
         elif new_state == gst.STATE_PAUSED:
             if self.status != self.BUFFERING:
                 if self.target_status == self.PLAYING:
                     self.player.set_state(gst.STATE_PLAYING)
                 else:
                     self.status = self.PAUSED
-        elif new_state == gst.STATE_READY:
-            if self.uses_ismd:
-                del self._videosink
-                self._videosink = None
+
+#        elif new_state == gst.STATE_READY:
+#            if self.uses_ismd:
+#                del self._videosink
+#                self._videosink = None
 
     def pause(self):
         self.target_status = self.PAUSED
@@ -279,14 +389,11 @@ class GstPlayer:
         self.playing = False
 
     def play(self):
-        self.target_status = self.PLAYING
         current = self.player.get_state(0)[1]
-        if current == gst.STATE_PAUSED:
+        if current != gst.STATE_PLAYING :
             self.player.set_state(gst.STATE_PLAYING)
-        elif current != gst.STATE_PLAYING :
-            self.player.set_state(gst.STATE_PAUSED)
-            self.status = self.PREROLLING
-        self.set_volume (self._volume)
+            #self.set_volume (self._volume)
+            logging.debug('Playback starting')
 
     def stop(self):
         self.player.set_state(gst.STATE_READY)
@@ -416,14 +523,15 @@ class GstPlayer:
         return False
 
     def get_duration(self):
+        # if we are in a live stream
+        if self.ts_mode:
+            return -1
+        # attempt to get a duration
         try:
             duration = self.player.query_duration(gst.FORMAT_TIME, None)[0]
-            duration = duration * (1e-09)
+            return duration * (1e-09)
         except:
-            duration = -1
-
-        logging.debug ("gave duration : %d" % duration)
-        return duration
+            return -1
 
     def set_jump(self, length):
         logging.debug ("jumping length : %d" % length)
@@ -458,7 +566,7 @@ class uplayerDBUSService(dbus.service.Object):
 
     @dbus.service.signal(UPLAYER_BUS_NAME, signature='i')
     def emitDuration(self, duration):
-        logging.debug ("Duration signal sent")
+        logging.debug ("Duration signal sent (%d)", duration)
         return
 
     @dbus.service.signal(UPLAYER_BUS_NAME)
@@ -532,7 +640,7 @@ class uplayerDBUSService(dbus.service.Object):
                          in_signature='d', out_signature='b')
     def set_volume(self, volume):
         return self.player.set_volume(volume)
-        
+
     @dbus.service.method(UPLAYER_BUS_NAME,
                          in_signature='i', out_signature='b')
     def set_jump(self, length):
