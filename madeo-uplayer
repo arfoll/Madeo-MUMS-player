@@ -20,6 +20,7 @@
 
 import sys
 import os
+import traceback
 
 os.environ["GST_DEBUG_DUMP_DOT_DIR"] = "/tmp"
 os.putenv('GST_DEBUG_DUMP_DIR_DIR', '/tmp')
@@ -44,6 +45,8 @@ logging.basicConfig(filename=LOG_FILENAME, level=logging.DEBUG, fomat=LOG_FORMAT
 class TSPipeline(gst.Pipeline):
 
     RECORDING_TEMPLATE = "/tmp/ts.XXXXXX"
+    AUDIO_BIN = 'queue name=aq ! decodebin2 ! autoaudiosink'
+    VIDEO_BIN = 'queue name=vq ! decodebin2 ! autovideosink'
 
     def __init__(self):
         gst.Pipeline.__init__(self, 'TSPipeline')
@@ -52,41 +55,59 @@ class TSPipeline(gst.Pipeline):
         self._videobin = None
         self._audiobin = None
 
-        self._vlinked = False
-        self._alinked = False
+        self.has_video = False
+        self.has_audio = False
 
         self._enable_buffering = False
         self._buffering_size = 512 * 1024        
         self._underrun_signal = None
         self._running_signal = None
 
-    def link_videopad(self, srcpad):
-        if not self._vlinked:
-            logging.debug('link video pad to %s' % srcpad)
-            sinkpad = self._vdec.get_pad('sink')
-            srcpad.link (sinkpad)
-            self._vlinked = True
+    def on_new_pad(self, element, pad):
+        padname = pad.get_name()
+        caps = pad.get_caps()
+        logging.debug('padname %s %s' % (padname, caps))
+        name = caps[0].get_name()
+        bin = None
+        queue = None
 
-    def link_audiopad(self, srcpad):
-        if not self._alinked:
-            logging.debug('link audio pad to %s' % srcpad)
-            sinkpad = self._asink.get_pad('sink')
-            srcpad.link (sinkpad)
-            self._alinked = True
+        if 'video' in name and not self.has_video:
+            bin = gst.parse_bin_from_description(self.VIDEO_BIN, False)
+            if bin:
+                queue = bin.get_by_name("vq")
+                self.has_video = True
+
+        elif 'audio' in name and not self.has_audio:
+            bin = gst.parse_bin_from_description(self.AUDIO_BIN, False)
+            if bin:
+                queue = bin.get_by_name("aq")
+                self.has_audio = True
+
+        if bin and queue:
+            logging.debug('adding decoders to pipeline')
+            targetpad = queue.get_pad('sink')
+            ghostpad = gst.GhostPad('sink', targetpad)
+            bin.add_pad(ghostpad)
+            self.add(bin)
+            bin.set_state(gst.STATE_READY)
+            pad.link(ghostpad)
+            bin.sync_state_with_parent()
+            # ensure to preroll the sinks
+            self.lost_state_full(True)
 
     def on_underrun (self, queue):
-            logging.debug("underrun detected")
-            if self._running_signal is None:
-                self._queue.set_property ("min-threshold-bytes", self._buffering_size)
-                self._running_signal = self._queue.connect('running', self.on_running)
-            self.post_message (gst.message_new_buffering (self, 0))
+        logging.debug("underrun detected")
+        if self._running_signal is None:
+            self._queue.set_property ("min-threshold-bytes", self._buffering_size)
+            self._running_signal = self._queue.connect('running', self.on_running)
+        self.post_message (gst.message_new_buffering (self, 0))
 
     def on_running (self, queue):
-            logging.debug("pipeline prerolled")
-            self._queue.set_property ("min-threshold-bytes", 0)
-            self._queue.disconnect (self._running_signal)
-            self._running_signal = None
-            self.post_message (gst.message_new_buffering (self, 100))
+        logging.debug("pipeline prerolled")
+        self._queue.set_property ("min-threshold-bytes", 0)
+        self._queue.disconnect (self._running_signal)
+        self._running_signal = None
+        self.post_message (gst.message_new_buffering (self, 100))
                 
     def build_pipeline (self, stream):
         if self._src is None:
@@ -104,39 +125,30 @@ class TSPipeline(gst.Pipeline):
                 self._running_signal = self._queue.connect('running', self.on_running)
             self.add(self._queue)
 
+            # mpeg parsing element
+            self._parse = gst.element_factory_make('mpegtsparse')
+            self.add(self._parse)
+            # mpeg shifter element and recording template
             self._shift = gst.element_factory_make('flumpegshifter')
             self._shift.set_property ("recording-template", self.RECORDING_TEMPLATE)
             self.add(self._shift)
+            # mpeg demux element
             self._demux = gst.element_factory_make('flutsdemux')
             self.add(self._demux)
-
             # Connect handler for 'pad-added' signal
-            self._demux.connect('pad-added', self.on_new_decoded_pad)
+            self._demux.connect('pad-added', self.on_new_pad)
+            # Link static part of the pipeline
+            gst.element_link_many(self._src, self._queue, self._parse, self._shift, self._demux)
 
-            gst.element_link_many(self._src, self._queue, self._shift, self._demux)
-
-            self._vdec = gst.element_factory_make('ismd_mpeg2_viddec')
-            #self.v_dec = gst.element_factory_make('decodebin2')
-            #self._vdec.set_property ("use-buffering", False)
-            self.add(self._vdec)
-
-            self._vsink = gst.element_factory_make('ismd_vidrend_bin')
-            self.add(self._vsink)
-
-            gst.element_link_many(self._vdec, self._vsink)
-
-            self._asink = gst.element_factory_make('ismd_audio_sink')
-            self._asink.set_property ("use-buffering", False)
-            self.add(self._asink)
-
-            self._asink.sync_state_with_parent()            
-            self._vsink.sync_state_with_parent()
-            self._vdec.sync_state_with_parent()
-            self._shift.sync_state_with_parent()            
+            self.make_vsink()
+            self.make_asink()
+ 
             self._demux.sync_state_with_parent()
+            self._shift.sync_state_with_parent()
+            self._parse.sync_state_with_parent()
             self._queue.sync_state_with_parent()
             self._src.sync_state_with_parent()
-            
+
     def destroy_pipeline(self):
         if self._src is not None:
             logging.debug("removing src elements")
@@ -146,20 +158,25 @@ class TSPipeline(gst.Pipeline):
             if self._running_signal is not None:
                 self._queue.disconnect(self._running_signal)
 
-            gst.element_unlink_many(self._src, self._queue, self._demux, self._vdec, self._vsink, self._asink)
+            gst.element_unlink_many(self._src, self._queue, self._demux,
+                self._vsink, self._parse, self._shift, self._asink)
             self._vlinked = False
             self._alinked = False
             
-            self.remove (self._src, self._queue, self._demux, self._vdec, self._vsink, self._asink)
+            self.remove (self._src, self._queue, self._demux, self._vsink,
+                self._asink, self._parse, self._shift)
+            del self._asink
             del self._asink
             del self._vsink
-            del self._vdec
             del self._demux
             del self._queue
             del self._src
+            del self._shift
+            del self._parse
+            self._parse = None
+            self._shift = None
             self._asink = None
             self._vsink = None
-            self._vdec = None
             self._demux = None
             self._queue = None
             self._src = None
@@ -175,24 +192,6 @@ class TSPipeline(gst.Pipeline):
             current = self.get_state(0)[1]
             self.destroy_pipeline()
             logging.debug('changed state to %s' % current)
-
-    def open_stream(self, stream):
-        current = self.get_state(0)[1]
-        self.do_cleanup()
-        self.build_pipeline (program)
-
-        logging.debug('going to change state to %s' % current)
-        self.set_state(current)
-   
-    def on_new_decoded_pad(self, element, pad):
-        padname = pad.get_name()
-        caps = pad.get_caps()
-        name = caps[0].get_name()
-        logging.debug('padname %s %s' % (padname, caps))
-        if 'video/' in name:
-            self.link_videopad(pad)
-        elif 'audio/' in name:
-            self.link_audiopad(pad)
 
 class GstPlayer:
     STOPPED = 0
@@ -543,7 +542,7 @@ class GstPlayer:
             logging.debug ("position is : %d" % position)
             jump_position = position + length
             logging.debug ("jump_position is : %d" % jump_position)
-            res = self.player.seek_simple(gst.FORMAT_TIME, gst.SEEK_FLAG_FLUSH, jump_position)
+            self.player.seek_simple(gst.FORMAT_TIME, gst.SEEK_FLAG_FLUSH, jump_position)
             return True
         except:
             return False
