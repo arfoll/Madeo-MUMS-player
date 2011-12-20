@@ -18,7 +18,11 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 # 02110-1301  USA
 
-import sys, os
+import sys
+import os
+
+os.environ["GST_DEBUG_DUMP_DOT_DIR"] = "/tmp"
+os.putenv('GST_DEBUG_DUMP_DIR_DIR', '/tmp')
 
 import gobject
 gobject.threads_init()
@@ -30,7 +34,7 @@ from dbus.mainloop.glib import DBusGMainLoop
 import logging
 
 UPLAYER_BUS_NAME = 'uk.co.madeo.uplayer'
-UPLAYER_BUS_PATH = '/uk/co/madeo/uplayer'
+UPLAYER_OBJ_PATH = '/uk/co/madeo/uplayer'
 LOG_FILENAME = '/tmp/uplayer.log'
 
 logging.basicConfig(filename=LOG_FILENAME,level=logging.DEBUG)
@@ -41,6 +45,18 @@ class GstPlayer:
     PAUSED = 2
     BUFFERING = 3
     PREROLLING = 4
+
+    DEMUX_BIN = \
+        'flumpegshifter name=timeshift recording-template=/tmp/ts.XXXXXX ! ' \
+        'flutsdemux name=demux'
+    VIDEO_BIN = 'queue name=vqueue ! decodebin2 ! ' \
+        'queue name=vdq max-size-buffers=3 max-size-time=0 max-size-bytes=0 ! '\
+        'videoscale ! colorspace ! queue name=vcq ! autovideosink name=vsink'
+    VIDEO_BIN_ISMD = 'queue name=vqueue ! decodebin2 ! ' \
+        'queue name=vdq max-size-buffers=3 max-size-time=0 max-size-bytes=0 ! '\
+        'autovideosink name=vsink'
+    AUDIO_BIN = 'queue name=aqueue ! decodebin2 ! queue name=adq ! audioconvert ! ' \
+        'queue name=acq ! autoaudiosink'
 
     def __init__(self):
         self.status = self.STOPPED
@@ -58,11 +74,29 @@ class GstPlayer:
 
         self._videosink = None
         self.uses_ismd = True
+        self.ts_mode = False
+        self.uri = ""
 
         self.player = None
+        self.bin = None
 
-    def reset_player(self):
-        self.player = gst.element_factory_make('playbin2', None)
+        self.has_video = None
+        self.has_audio = None
+
+    def setup_player(self):
+        if self.ts_mode:
+            self.player = gst.Pipeline("player")
+            self.bin = gst.parse_bin_from_description('%s ! mpegtsparse ! %s' % \
+                (self.uri, self.DEMUX_BIN), False)
+            demux = self.bin.get_by_name("demux")
+            demux.connect('pad-added', self.on_new_pad)
+            self.player.add(self.bin)
+            self.bin.sync_state_with_parent()
+
+        else:
+            self.player = gst.element_factory_make('playbin2', None)
+            self.player.set_property('uri', self.uri)
+
         bus = self.player.get_bus()
         #ban the mpeg4 ISMD H/W decoder because it usually gives garbage
         #See bug MeeGo #BOO 11189
@@ -76,6 +110,39 @@ class GstPlayer:
         bus.connect('message::state-changed', self.on_message_state_changed)
         bus.connect('message::async-done', self.on_message_async_done)
         bus.add_signal_watch()
+
+    def on_new_pad(self, element, pad):
+        padname = pad.get_name()
+        caps = pad.get_caps()
+        name = caps[0].get_name()
+        bin = None
+        queue = None
+
+        if 'video' in name and not self.has_video:
+            bin = gst.parse_bin_from_description(self.VIDEO_BIN, False)
+            if bin:
+                queue = bin.get_by_name("vqueue")
+                self.has_video = True
+
+        elif 'audio' in name and not self.has_audio:
+            bin = gst.parse_bin_from_description(self.AUDIO_BIN, False)
+            if bin:
+                queue = bin.get_by_name("aqueue")
+                self.has_audio = True
+
+        if bin and queue:
+            targetpad = queue.get_pad('sink')
+            ghostpad = gst.GhostPad('sink', targetpad)
+            bin.add_pad(ghostpad)
+            self.bin.add(bin)
+            bin.set_state(gst.STATE_READY)
+            pad.link(ghostpad)
+            bin.sync_state_with_parent()
+            # ensure to preroll the sinks
+            self.bin.lost_state_full(True)
+
+        gst.DEBUG_BIN_TO_DOT_FILE (self.player, \
+                    gst.DEBUG_GRAPH_SHOW_ALL, 'uplayer_bin.png')
 
     def on_message_async_done(self, bus, message):
         self.n_video = self.player.get_property('n-video')
@@ -122,7 +189,10 @@ class GstPlayer:
         send_duration (self.get_duration())
 
     def cleanup(self):
-        if self.player is not None:
+        if self.bin:
+            self.player.remove(self.bin)
+            self.player.remove(self.bin)
+        if self.player:
             current = self.player.get_state(0)[1]
             if current != gst.STATE_NULL:
                 logging.debug ('do_cleanup')
@@ -132,21 +202,37 @@ class GstPlayer:
                 self.player.set_state(gst.STATE_NULL)
                 current = self.player.get_state(1000000000)[1]
                 logging.debug ('changed state to %s' % current)
+        #scrap all elements we may have
+        bin = None
+        self.player = None
+        #reset vars
+        self.has_video = None
+        self.has_audio = None
 
     def on_message_eos(self, bus, message):
         send_eos()
         self.playing = False
         self.stop()
 
-    def set_uri(self, uri):
-        # At every set_uri we reset playbin2
-        self.cleanup()
-        self.reset_player()
+    def set_ts(self, ts):
+        if ts:
+            logging.debug ('TS mode set')
+            self.ts_mode=True
+            return True
+        self.ts_mode=False
+        return False
 
+    def set_uri(self, uri):
         if not gst.uri_is_valid(uri):
             logging.debug ("Error: Invalid URI: %s\n" % uri)
             return False
-        self.player.set_property('uri', uri)
+
+        # if valid we set the new uri which is set in setup
+        self.uri = uri
+        # At every set_uri we clean the pipeline
+        self.cleanup()
+        self.setup_player()
+        # signal that we have a new uri
         send_new_uri(uri)
         return True
 
@@ -171,6 +257,9 @@ class GstPlayer:
             if self.status != self.PLAYING:
                 self.status = self.PLAYING
                 self.playing = True
+                gst.DEBUG_BIN_TO_DOT_FILE (self.player, \
+                    gst.DEBUG_GRAPH_SHOW_ALL, 'uplayer_pipe.png')
+
 
         elif new_state == gst.STATE_PAUSED:
             if self.status != self.BUFFERING:
@@ -354,7 +443,7 @@ class GstPlayer:
 class uplayerDBUSService(dbus.service.Object):
     def __init__(self):
         bus_name = dbus.service.BusName(UPLAYER_BUS_NAME, bus=dbus.SystemBus())
-        dbus.service.Object.__init__(self, bus_name, UPLAYER_BUS_PATH)
+        dbus.service.Object.__init__(self, bus_name, UPLAYER_OBJ_PATH)
         self.player = GstPlayer()
 
     @dbus.service.signal(UPLAYER_BUS_NAME)
@@ -448,6 +537,11 @@ class uplayerDBUSService(dbus.service.Object):
                          in_signature='i', out_signature='b')
     def set_jump(self, length):
         return self.player.set_jump(length)
+
+    @dbus.service.method(UPLAYER_BUS_NAME,
+                         in_signature='b', out_signature='b')
+    def set_ts_mode(self, ts):
+        return self.player.set_ts(ts)
 
 DBusGMainLoop(set_as_default=True)
 uplayerService = uplayerDBUSService()
