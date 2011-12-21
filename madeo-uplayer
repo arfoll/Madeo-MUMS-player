@@ -46,20 +46,20 @@ class TSPipeline(gst.Pipeline):
 
     RECORDING_TEMPLATE = "/tmp/ts.XXXXXX"
     AUDIO_BIN = 'queue name=aq ! decodebin2 ! autoaudiosink'
+    #AUDIO_BIN = 'queue name=aq ! ismd_audio_sink'
     VIDEO_BIN = 'queue name=vq ! decodebin2 ! autovideosink'
+    #VIDEO_BIN = 'queue name=vq ! ismd_mpeg2_viddec ! ismd_vidrend_bin'
 
     def __init__(self):
         gst.Pipeline.__init__(self, 'TSPipeline')
 
         self._src = None
-        self._videobin = None
-        self._audiobin = None
 
         self.has_video = False
         self.has_audio = False
 
         self._enable_buffering = False
-        self._buffering_size = 512 * 1024        
+        self._buffering_size = 512 * 1024
         self._underrun_signal = None
         self._running_signal = None
 
@@ -95,6 +95,9 @@ class TSPipeline(gst.Pipeline):
             # ensure to preroll the sinks
             self.lost_state_full(True)
 
+            gst.DEBUG_BIN_TO_DOT_FILE (self, \
+                gst.DEBUG_GRAPH_SHOW_ALL, 'uplayer_tspipe.png')
+
     def on_underrun (self, queue):
         logging.debug("underrun detected")
         if self._running_signal is None:
@@ -108,7 +111,7 @@ class TSPipeline(gst.Pipeline):
         self._queue.disconnect (self._running_signal)
         self._running_signal = None
         self.post_message (gst.message_new_buffering (self, 100))
-                
+
     def build_pipeline (self, stream):
         if self._src is None:
             logging.debug('Opening %s' % stream)
@@ -129,20 +132,18 @@ class TSPipeline(gst.Pipeline):
             self._parse = gst.element_factory_make('mpegtsparse')
             self.add(self._parse)
             # mpeg shifter element and recording template
-            self._shift = gst.element_factory_make('flumpegshifter')
-            self._shift.set_property ("recording-template", self.RECORDING_TEMPLATE)
-            self.add(self._shift)
+            #self._shift = gst.element_factory_make('flumpegshifter')
+            #self._shift.set_property ("recording-template", self.RECORDING_TEMPLATE)
+            #self.add(self._shift)
             # mpeg demux element
             self._demux = gst.element_factory_make('flutsdemux')
             self.add(self._demux)
             # Connect handler for 'pad-added' signal
             self._demux.connect('pad-added', self.on_new_pad)
             # Link static part of the pipeline
-            gst.element_link_many(self._src, self._queue, self._parse, self._shift, self._demux)
+            #gst.element_link_many(self._src, self._queue, self._parse, self._shift, self._demux)
+            gst.element_link_many(self._src, self._queue, self._parse, self._demux)
 
-            self.make_vsink()
-            self.make_asink()
- 
             self._demux.sync_state_with_parent()
             self._shift.sync_state_with_parent()
             self._parse.sync_state_with_parent()
@@ -162,7 +163,7 @@ class TSPipeline(gst.Pipeline):
                 self._vsink, self._parse, self._shift, self._asink)
             self._vlinked = False
             self._alinked = False
-            
+
             self.remove (self._src, self._queue, self._demux, self._vsink,
                 self._asink, self._parse, self._shift)
             del self._asink
@@ -236,10 +237,10 @@ class GstPlayer:
         bus = self.player.get_bus()
         #ban the mpeg4 ISMD H/W decoder because it usually gives garbage
         #See bug MeeGo #BOO 11189
-        reg = gst.registry_get_default()
-        feature = reg.find_feature ("ismd_mpeg4_viddec", gst.TYPE_ELEMENT_FACTORY)
-        if feature is not None:
-            feature.set_rank (gst.RANK_NONE)
+        #reg = gst.registry_get_default()
+        #feature = reg.find_feature ("ismd_mpeg4_viddec", gst.TYPE_ELEMENT_FACTORY)
+        #if feature is not None:
+        #    feature.set_rank (gst.RANK_NONE)
         #connect stuff to the bus
         bus.connect('message::eos', self.on_message_eos)
         bus.connect('message::error', self.on_message_error)
@@ -292,6 +293,7 @@ class GstPlayer:
                             logging.debug("SMD audio sink %s" % child)
         send_playing ()
         send_duration (self.get_duration())
+        self.player.set_state(gst.STATE_PLAYING)
 
     def cleanup(self):
         logging.debug('cleaning up player')
@@ -320,11 +322,13 @@ class GstPlayer:
 
     def set_ts(self, ts):
         if ts:
-            logging.debug ('TS mode set')
-            self.ts_mode=True
+            logging.debug ('TS mode on')
+            self.ts_mode = True
             return True
-        self.ts_mode=False
-        return False
+        else:
+            logging.debug ('TS mode off')
+            self.ts_mode = False
+            return False
 
     def set_uri(self, uri):
         if not gst.uri_is_valid(uri):
@@ -366,25 +370,9 @@ class GstPlayer:
             if self.status != self.PLAYING:
                 self.status = self.PLAYING
                 self.playing = True
-            gst.DEBUG_BIN_TO_DOT_FILE (self.player, \
-                gst.DEBUG_GRAPH_SHOW_ALL, 'uplayer_pipe.png')
-                
-        elif new_state == gst.STATE_PAUSED:
-            if self.status != self.BUFFERING:
-                if self.target_status == self.PLAYING:
-                    self.player.set_state(gst.STATE_PLAYING)
-                else:
-                    self.status = self.PAUSED
-
-#        elif new_state == gst.STATE_READY:
-#            if self.uses_ismd:
-#                del self._videosink
-#                self._videosink = None
 
     def pause(self):
-        self.target_status = self.PAUSED
         self.player.set_state(gst.STATE_PAUSED)
-        current = self.player.get_state(0)[1]
         self.playing = False
 
     def play(self):
@@ -395,17 +383,19 @@ class GstPlayer:
             logging.debug('Playback starting')
 
     def stop(self):
-        self.player.set_state(gst.STATE_READY)
-        current = self.player.get_state(0)[1]
-        if self.status != self.STOPPED:
-            self.status = self.STOPPED
-            self.target_status = self.status
+        gst.DEBUG_BIN_TO_DOT_FILE (self.player, gst.DEBUG_GRAPH_SHOW_ALL, 'uplayer_dying.png')
+        self.cleanup()
+        self.player.set_state(gst.STATE_STOPPED)
 
     def get_state(self, timeout=1):
         return self.player.get_state(timeout=timeout)
 
     def is_playing(self):
-        return self.playing
+        current = self.player.get_state(0)[1]
+        if current != gst.STATE_PLAYING:
+            return False
+        else:
+            return True
 
     def get_position(self):
         try:

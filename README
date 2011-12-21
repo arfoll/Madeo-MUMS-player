@@ -33,6 +33,9 @@ http://www.madeo.co.uk/files/libgstmpegdemux.so
 Note by default this is meant to be run as a daemon and will log to /tmp/uplayer
 by default
 
+-- Some Cheating --
+dbus-send --system --type=method_call --dest=uk.co.madeo.uplayer /uk/co/madeo/uplayer uk.co.madeo.uplayer.pause
+
 -- Thanks --
 Fluendo - for the great code examples:
 https://core.fluendo.com/gstreamer/svn/trunk/gst-fluendo-ismd/examples/ismdplay_dvb.py
