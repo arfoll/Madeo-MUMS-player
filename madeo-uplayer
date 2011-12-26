@@ -45,8 +45,8 @@ logging.basicConfig(filename=LOG_FILENAME, level=logging.DEBUG, fomat=LOG_FORMAT
 class TSPipeline(gst.Pipeline):
 
     RECORDING_TEMPLATE = "/tmp/ts.XXXXX"
-    AUDIO_BIN = 'queue name=aq ! decodebin2 ! autoaudiosink'
-    VIDEO_BIN = 'queue name=vq ! decodebin2 ! autovideosink'
+    AUDIO_BIN = 'queue name=aq ! autoaudiosink'
+    VIDEO_BIN = 'queue name=vq ! autovideosink'
 
     def __init__(self):
         gst.Pipeline.__init__(self, 'TSPipeline')
@@ -110,74 +110,34 @@ class TSPipeline(gst.Pipeline):
         self._running_signal = None
         self.post_message (gst.message_new_buffering (self, 100))
 
-    def build_pipeline (self, stream):
+    def build_pipeline (self, uri):
         if self._src is None:
-            logging.debug('Opening %s' % stream)
-            logging.debug('create src')
-            self._src = gst.parse_launch('filesrc location=%s' % stream)
-            logging.debug('adding src %s to bin' % self._src)
+            logging.debug('Opening %s' % uri)
+            logging.debug('creating initial elements for TS pipeline')
+            self._src = gst.parse_bin_from_description('%s ! mpegtsparse ! ' \
+                'flumpegshifter name=timeshift recording-template=/tmp/ts.XXXXXX ! ' \
+                'decodebin2 name=dec ! autovideosink name=autovidsink ' \
+                'dec. ! autoaudiosink' % uri, False)
+            logging.debug('adding src,dec,shifter %s to pipeline' % self._src)
             self.add(self._src)
-            logging.debug('create queue')
-            self._queue = gst.element_factory_make('queue', 'tsqueue')
-            if self._enable_buffering:
-                self._queue.set_property ("min-threshold-bytes", self._buffering_size)
-                self._queue.set_property ("max-size-buffers", 0)
-                self._underrun_signal = self._queue.connect('underrun', self.on_underrun)
-                self._running_signal = self._queue.connect('running', self.on_running)
-            self.add(self._queue)
 
-            # mpeg parsing element
-            self._parse = gst.element_factory_make('mpegtsparse')
-            self.add(self._parse)
-            # mpeg shifter element and recording template
-            #self._shift = gst.element_factory_make('flumpegshifter')
-            #self._shift.set_property ("recording-template", self.RECORDING_TEMPLATE)
-            #self.add(self._shift)
-            # mpeg demux element
-            self._demux = gst.element_factory_make('flutsdemux')
-            self.add(self._demux)
-            # Connect handler for 'pad-added' signal
-            self._demux.connect('pad-added', self.on_new_pad)
-            # Link static part of the pipeline
-            #gst.element_link_many(self._src, self._queue, self._parse, self._shift, self._demux)
-            gst.element_link_many(self._src, self._queue, self._parse, self._demux)
-
-            self._demux.sync_state_with_parent()
-            self._shift.sync_state_with_parent()
-            self._parse.sync_state_with_parent()
-            self._queue.sync_state_with_parent()
-            self._src.sync_state_with_parent()
+            #self._src.connect('pad-added', self.on_new_pad)
 
     def destroy_pipeline(self):
         if self._src is not None:
-            logging.debug("removing src elements")
+            logging.debug("removing elements from TS pipeline")
             if self._underrun_signal is not None:
                 self._queue.disconnect (self._underrun_signal)
 
             if self._running_signal is not None:
                 self._queue.disconnect(self._running_signal)
 
-            gst.element_unlink_many(self._src, self._queue, self._demux,
-                self._vsink, self._parse, self._shift, self._asink)
+            #gst.element_unlink_many(self._src)
             self._vlinked = False
             self._alinked = False
 
-            self.remove (self._src, self._queue, self._demux, self._vsink,
-                self._asink, self._parse, self._shift)
-            del self._asink
-            del self._asink
-            del self._vsink
-            del self._demux
-            del self._queue
+            self.remove (self._src)
             del self._src
-            del self._shift
-            del self._parse
-            self._parse = None
-            self._shift = None
-            self._asink = None
-            self._vsink = None
-            self._demux = None
-            self._queue = None
             self._src = None
 
     def do_cleanup(self):
@@ -289,9 +249,10 @@ class GstPlayer:
                         factory = child.get_factory()
                         if "ismd_audio_sink" in factory.get_name():
                             logging.debug("SMD audio sink %s" % child)
-        send_playing ()
+
         send_duration (self.get_duration())
-        self.player.set_state(gst.STATE_PLAYING)
+#        gst.DEBUG_BIN_TO_DOT_FILE (self.player, \
+#                gst.DEBUG_GRAPH_SHOW_ALL, 'uplayer_tspipe.png')
 
     def cleanup(self):
         logging.debug('cleaning up player')
@@ -334,10 +295,7 @@ class GstPlayer:
             return False
 
         # if valid we set the new uri which is set in setup
-        if self.ts_mode:
-          self.uri = uri.replace('file://', '')
-        else:
-          self.uri = uri
+        self.uri = uri
         # At every set_uri we clean the pipeline
         self.cleanup()
         self.setup_player()
@@ -370,6 +328,7 @@ class GstPlayer:
                 self.playing = True
 
     def pause(self):
+        logging.debug('Pausing pipeline')
         self.player.set_state(gst.STATE_PAUSED)
         self.playing = False
 
@@ -381,7 +340,6 @@ class GstPlayer:
             logging.debug('Playback starting')
 
     def stop(self):
-        gst.DEBUG_BIN_TO_DOT_FILE (self.player, gst.DEBUG_GRAPH_SHOW_ALL, 'uplayer_dying.png')
         self.cleanup()
         self.player.set_state(gst.STATE_STOPPED)
 
@@ -405,9 +363,9 @@ class GstPlayer:
         return position
 
     def seek(self, location):
-	loging.debug ("seek to %d", location)
-	# convert seconds to nanoseconds
-	location = location  * (1e09)
+        logging.debug ("seek to %d", location)
+        # convert seconds to nanoseconds
+        location = location  * (1e09)
         if self._rate < 0:
             res = self.player.seek (self._rate, gst.FORMAT_TIME,
                 gst.SEEK_FLAG_FLUSH | gst.SEEK_FLAG_KEY_UNIT,
@@ -475,12 +433,22 @@ class GstPlayer:
     def set_window_id(self, window_id):
         #check we are using xvimagesink?
         try:
-            logging.debug ("_videosink is %s" % self._videosink)
-            self._videosink.set_xwindow_id(window_id)
+            if self.ts_mode:
+                sink = self.player.get_by_name("autovidsink")
+                logging.debug("using Autovideosink")
+                for child in sink.sinks():
+                    factory = child.get_factory()
+                    if "xvimagesink" in factory.get_name():
+                        logging.debug("xvimagesink sink %s" % child)
+                        child.set_xwindow_id(window_id)
+            else:
+                logging.debug ("_videosink is %s" % self._videosink)
+                self._videosink.set_xwindow_id(window_id)
+
             logging.debug ("setting xwindowid to %s succeeded" % window_id)
             return True
         except:
-            logging.debug ("setting xwindowid to %s failed" % window_id)
+            logging.debug ("setting xwindowid to %s failed : %s" % window_id)
             return False
 
     def set_volume(self, volume):
