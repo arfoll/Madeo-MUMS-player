@@ -44,11 +44,9 @@ logging.basicConfig(filename=LOG_FILENAME, level=logging.DEBUG, fomat=LOG_FORMAT
 
 class TSPipeline(gst.Pipeline):
 
-    RECORDING_TEMPLATE = "/tmp/ts.XXXXXX"
+    RECORDING_TEMPLATE = "/tmp/ts.XXXXX"
     AUDIO_BIN = 'queue name=aq ! decodebin2 ! autoaudiosink'
-    #AUDIO_BIN = 'queue name=aq ! ismd_audio_sink'
     VIDEO_BIN = 'queue name=vq ! decodebin2 ! autovideosink'
-    #VIDEO_BIN = 'queue name=vq ! ismd_mpeg2_viddec ! ismd_vidrend_bin'
 
     def __init__(self):
         gst.Pipeline.__init__(self, 'TSPipeline')
@@ -407,9 +405,9 @@ class GstPlayer:
         return position
 
     def seek(self, location):
-        """
-        @param location: time to seek to, in nanoseconds
-        """
+	loging.debug ("seek to %d", location)
+	# convert seconds to nanoseconds
+	location = location  * (1e09)
         if self._rate < 0:
             res = self.player.seek (self._rate, gst.FORMAT_TIME,
                 gst.SEEK_FLAG_FLUSH | gst.SEEK_FLAG_KEY_UNIT,
@@ -521,21 +519,6 @@ class GstPlayer:
             return duration * (1e-09)
         except:
             return -1
-
-    def set_jump(self, length):
-        logging.debug ("jumping length : %d" % length)
-        try:
-            # GStreamer wants nanoseconds
-            length = length * (1e09)
-            logging.debug ("jumping length in nanoseconds : %d" % length)
-            position, format = self.player.query_position(gst.FORMAT_TIME)
-            logging.debug ("position is : %d" % position)
-            jump_position = position + length
-            logging.debug ("jump_position is : %d" % jump_position)
-            self.player.seek_simple(gst.FORMAT_TIME, gst.SEEK_FLAG_FLUSH, jump_position)
-            return True
-        except:
-            return False
 
 class uplayerDBUSService(dbus.service.Object):
     def __init__(self):
