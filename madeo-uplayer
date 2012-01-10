@@ -110,18 +110,21 @@ class TSPipeline(gst.Pipeline):
         self._running_signal = None
         self.post_message (gst.message_new_buffering (self, 100))
 
-    def build_pipeline (self, uri):
+    def build_pipeline (self, uri, ismd):
         if self._src is None:
             logging.debug('Opening %s' % uri)
-            logging.debug('creating initial elements for TS pipeline')
-            self._src = gst.parse_bin_from_description('%s ! mpegtsparse ! ' \
-                'flumpegshifter name=timeshift recording-template=/tmp/ts.XXXXXX ! ' \
-                'decodebin2 name=dec ! autovideosink name=autovidsink ' \
-                'dec. ! autoaudiosink' % uri, False)
-            logging.debug('adding src,dec,shifter %s to pipeline' % self._src)
-            self.add(self._src)
-
-            #self._src.connect('pad-added', self.on_new_pad)
+            if ismd:
+                logging.debug('using ismd + ts mode')
+                self._src = gst.parse_bin_from_description('%s ! ' \
+                    'flumpegshifter name=timeshift recording-template=/tmp/ts.XXXXXX ! ' \
+                    'flutsdemux name=dec ! autoaudiosink dec. ! decodebin2 ! autovideosink name=autovidsink ' % uri, False)
+                logging.debug('ismd ts pipeline parsed')
+                self.add(self._src)
+            else:
+                self._src = gst.parse_bin_from_description('%s ! ' \
+                    'flumpegshifter name=timeshift recording-template=/tmp/ts.XXXXXX ! ' \
+                    'decodebin2 name=dec ! autoaudiosink dec. ! autovideosink name=autovidsink ' % uri, False)
+                self.add(self._src)
 
     def destroy_pipeline(self):
         if self._src is not None:
@@ -175,6 +178,13 @@ class GstPlayer:
 
         self._videosink = None
         self.uses_ismd = True
+        #we assume that we need to find ismd_audio_sink in order to use ismd
+        reg = gst.registry_get_default()
+        ismdaudiosink = reg.find_feature ("ismd_audio_sink", gst.TYPE_ELEMENT_FACTORY)
+        if ismdaudiosink is None:
+            logging.debug('disabling ismd mode')
+            self.uses_ismd = False
+
         self.ts_mode = False
         self.uri = ""
 
@@ -185,20 +195,15 @@ class GstPlayer:
 
     def setup_player(self):
         logging.debug('starting player setup')
+
         if self.ts_mode:
             self.player = TSPipeline()
-            self.player.build_pipeline(self.uri)
+            self.player.build_pipeline(self.uri, self.uses_ismd)
         else:
             self.player = gst.element_factory_make('playbin2', None)
             self.player.set_property('uri', self.uri)
 
         bus = self.player.get_bus()
-        #ban the mpeg4 ISMD H/W decoder because it usually gives garbage
-        #See bug MeeGo #BOO 11189
-        #reg = gst.registry_get_default()
-        #feature = reg.find_feature ("ismd_mpeg4_viddec", gst.TYPE_ELEMENT_FACTORY)
-        #if feature is not None:
-        #    feature.set_rank (gst.RANK_NONE)
         #connect stuff to the bus
         bus.connect('message::eos', self.on_message_eos)
         bus.connect('message::error', self.on_message_error)
